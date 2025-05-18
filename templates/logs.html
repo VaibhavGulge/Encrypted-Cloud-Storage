@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Access Logs</title>
+</head>
+<body>
+    <h2>Access Logs for {{ current_user.username }}</h2>
+    <table border="1">
+        <tr>
+            <th>Timestamp</th>
+            <th>Action</th>
+            <th>File Name</th>
+        </tr>
+        {% for log in logs %}
+        <tr>
+            <td>{{ log.timestamp }}</td>
+            <td>{{ log.action }}</td>
+            <td>{{ log.filename }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <a href="{{ url_for('upload') }}">Back to Uploads</a>
+</body>
+</html>

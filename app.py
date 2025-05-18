@@ -5,6 +5,7 @@ from flask_bcrypt import Bcrypt
 from cryptography.fernet import Fernet
 import os
 from io import BytesIO
+from datetime import datetime
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'your_secret_key'
@@ -40,6 +41,13 @@ class File(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     filename = db.Column(db.String(255), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+
+class Log(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=False)
+    filename = db.Column(db.String(255), nullable=False)
+    action = db.Column(db.String(50), nullable=False)  # 'uploaded', 'deleted'
+    timestamp = db.Column(db.DateTime, default=datetime.utcnow)
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -98,15 +106,20 @@ def home():
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload():
+    user_folder = os.path.join(app.config['UPLOAD_FOLDER'], current_user.username)
+    os.makedirs(user_folder, exist_ok=True)
     if request.method == 'POST':
         file = request.files['file']
         if file:
             encrypted_data = encrypt_file(file.read())
-            filepath = os.path.join(app.config['UPLOAD_FOLDER'], file.filename + '.enc')
+            filepath = os.path.join(user_folder, file.filename + '.enc')
             with open(filepath, 'wb') as f:
                 f.write(encrypted_data)
             new_file = File(filename=file.filename, user_id=current_user.id)
             db.session.add(new_file)
+            # Log upload
+            log = Log(username=current_user.username, filename=file.filename, action='uploaded')
+            db.session.add(log)
             db.session.commit()
             flash('File uploaded and encrypted successfully!')
     user_files = File.query.filter_by(user_id=current_user.id).all()
@@ -120,9 +133,13 @@ def delete_file(file_id):
     if file_record.user_id != current_user.id:
         flash('Access denied!')
         return redirect(url_for('upload'))
-    enc_path = os.path.join(app.config['UPLOAD_FOLDER'], file_record.filename + '.enc')
+    user_folder = os.path.join(app.config['UPLOAD_FOLDER'], current_user.username)
+    enc_path = os.path.join(user_folder, file_record.filename + '.enc')
     if os.path.exists(enc_path):
         os.remove(enc_path)
+    # Log delete
+    log = Log(username=current_user.username, filename=file_record.filename, action='deleted')
+    db.session.add(log)
     db.session.delete(file_record)
     db.session.commit()
     flash('File deleted successfully!')
@@ -136,7 +153,8 @@ def preview(file_id):
     if file_record.user_id != current_user.id:
         flash('Access denied!')
         return redirect(url_for('upload'))
-    enc_path = os.path.join(app.config['UPLOAD_FOLDER'], file_record.filename + '.enc')
+    user_folder = os.path.join(app.config['UPLOAD_FOLDER'], current_user.username)
+    enc_path = os.path.join(user_folder, file_record.filename + '.enc')
     if not os.path.exists(enc_path):
         flash('File not found!')
         return redirect(url_for('upload'))
@@ -153,6 +171,12 @@ def preview(file_id):
     # Other files: force download
     else:
         return send_file(BytesIO(decrypted_data), download_name=file_record.filename, as_attachment=True)
+
+@app.route('/logs')
+@login_required
+def logs():
+    user_logs = Log.query.filter_by(username=current_user.username).order_by(Log.timestamp.desc()).all()
+    return render_template('logs.html', logs=user_logs)
 
 if __name__ == '__main__':
     with app.app_context():
